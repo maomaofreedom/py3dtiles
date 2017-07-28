@@ -72,7 +72,7 @@ class GlTF(object):
             Each dictionary has the data for one geometry
             arrays['position']: binary array of vertex positions
             arrays['normal']: binary array of vertex normals
-            arrays['uv']: binary array of vertex texture coordinates (Not implemented yet)
+            arrays['uv']: binary array of vertex texture coordinates
             arrays['bbox']: geometry bounding box (numpy.array)
 
         transform : numpy.array
@@ -85,9 +85,12 @@ class GlTF(object):
 
         glTF = GlTF()
 
+        textured = 'uv' in arrays[0]
+
         binVertice = []
         binNormals = []
         binIds = []
+        binUvs = []
         nVertice = []
         bb = []
         for i, geometry in enumerate(arrays):
@@ -98,35 +101,45 @@ class GlTF(object):
             bb.append(geometry['bbox'])
             if batched:
                 binIds.append(np.full(n, i, dtype=np.uint16))
+            if textured:
+                binUvs.append(geometry['uv'])
 
-        glTF.header = compute_header(binVertice, binNormals, binIds,
+        glTF.header = compute_header(binVertice, binNormals, binIds, binUvs,
                                      nVertice, bb, transform,
-                                     binary, batched, uri)
+                                     binary, uri)
         glTF.body = np.frombuffer(
-            compute_binary(binVertice, binNormals, binIds), dtype=np.uint8)
+            compute_binary(binVertice, binNormals, binIds, binUvs), dtype=np.uint8)
 
         return glTF
 
 
-def compute_binary(binVertices, binNormals, binIds):
+def compute_binary(binVertices, binNormals, binIds, binUvs):
     bv = b''.join(binVertices)
     bn = b''.join(binNormals)
     bid = b''.join(binIds)
-    return bv + bn + bid
+    buv = b''.join(binUvs)
+    return bv + bn + bid + buv
 
 
-def compute_header(binVertices, binNormals, binIds,
+def compute_header(binVertices, binNormals, binIds, binUvs,
                    nVertices, bb, transform,
-                   bgltf, batched, uri):
+                   bgltf, uri):
+    batched = len(binIds) != 0
+    textured = len(binUvs) != 0
     # Buffer
     meshNb = len(binVertices)
     sizeVce = []
     for i in range(0, meshNb):
         sizeVce.append(len(binVertices[i]))
 
+    byteLength = 2 * sum(sizeVce)
+    if batched:
+        byteLength += 1 / 6 * sum(sizeVce)
+    if textured:
+        byteLength += sum(sizeVce)
     buffers = {
         'binary_glTF': {
-            'byteLength': 13/6 * sum(sizeVce) if batched else 2 * sum(sizeVce),
+            'byteLength': round(byteLength),
             'type': "arraybuffer"
         }
     }
@@ -148,11 +161,18 @@ def compute_header(binVertices, binNormals, binIds,
             'target': 34962
         }
     }
+    if textured:
+        bufferViews['BV_uvs'] = {
+            'buffer': "binary_glTF",
+            'byteLength': round(2 / 3 * sum(sizeVce)),
+            'byteOffset': 2 * sum(sizeVce),
+            'target': 34962
+        }
     if batched:
         bufferViews['BV_ids'] = {
             'buffer': "binary_glTF",
             'byteLength': sum(sizeVce) / 6,
-            'byteOffset': 2 * sum(sizeVce),
+            'byteOffset': round(8 / 9 * sum(sizeVce)) if textured else 2 * sum(sizeVce),
             'target': 34962
         }
 
@@ -191,6 +211,15 @@ def compute_header(binVertices, binNormals, binIds,
             'count': sum(nVertices),
             'type': "SCALAR"
         }
+        if textured:
+            accessors["AT"] = {
+                'bufferView': "BV_uvs",
+                'byteOffset': 0,
+                'byteStride': 8,
+                'componentType': 5126,
+                'count': sum(nVertices),
+                'type': "VEC3"
+            }
     else:
         for i in range(0, meshNb):
             accessors["AV_" + str(i)] = {
@@ -213,6 +242,15 @@ def compute_header(binVertices, binNormals, binIds,
                 'min': [-1, -1, -1],
                 'type': "VEC3"
             }
+            if textured:
+                accessors["AT_" + str(i)] = {
+                    'bufferView': "BV_uvs",
+                    'byteOffset': sum(sizeVce[0:i]),
+                    'byteStride': 8,
+                    'componentType': 5126,
+                    'count': sum(nVertices),
+                    'type': "VEC3"
+                }
 
     # Meshes
     meshes = {}
@@ -228,6 +266,8 @@ def compute_header(binVertices, binNormals, binIds,
                 "mode": 4
             }]
         }
+        if textured:
+            meshes["M"]["primitives"][0]["attributes"]["TEXCOORD_0"] = "AT"
     else:
         for i in range(0, meshNb):
             meshes["M" + str(i)] = {
@@ -241,6 +281,28 @@ def compute_header(binVertices, binNormals, binIds,
                     "mode": 4
                 }]
             }
+            if textured:
+                meshes["M" + str(i) ]["primitives"][0]["attributes"]["TEXCOORD_0"] = "AT_" + str(i)
+
+    # Materials WIP
+    if textured:
+        meshes["M"]["primitives"][0]["material"] = 'textureMaterial'
+            material = {
+                'textureMaterial': {
+                    'technique': "technique0",
+                    "values": {
+                        "diffuse": "atlas",
+                }
+                'name': "material0"
+            }
+    else:
+        material = {
+            'defaultMaterial': {
+                'name': "None"
+            }
+        }
+    }
+
 
     # Nodes
     if batched:
@@ -279,12 +341,39 @@ def compute_header(binVertices, binNormals, binIds,
         'accessors': accessors,
         'bufferViews': bufferViews,
         'buffers': buffers,
-        'materials': {
-            'defaultMaterial': {
-                'name': "None"
-            }
+        'materials': material
         }
     }
+
+    if textured:
+        header["textures"] = {
+            "texture_file2": {
+                "format": 6408,
+                "internalFormat": 6408,
+                "sampler": "sampler_0",
+                "source": "file2",
+                "target": 3553,
+                "type": 5121
+            }
+        }
+        header["shaders"] = {
+            "FS": {
+                "type": 35632,
+                "uri": "data:text/plain;base64,cHJlY2lzaW9uIGhpZ2hwIGZsb2F0Owp2YXJ5aW5nIHZlYzIgdl90ZXhjb29yZDA7CnVuaWZvcm0gc2FtcGxlcjJEIHVfZGlmZnVzZTsKdW5pZm9ybSB2ZWM0IHVfZW1pc3Npb247CnZvaWQgbWFpbih2b2lkKSB7CnZlYzQgY29sb3IgPSB2ZWM0KDAuLCAwLiwgMC4sIDAuKTsKdmVjNCBkaWZmdXNlID0gdmVjNCgwLiwgMC4sIDAuLCAxLik7CnZlYzQgZW1pc3Npb247CmRpZmZ1c2UgPSB0ZXh0dXJlMkQodV9kaWZmdXNlLCB2X3RleGNvb3JkMCk7CmVtaXNzaW9uID0gdV9lbWlzc2lvbjsKY29sb3IueHl6ICs9IGRpZmZ1c2UueHl6Owpjb2xvci54eXogKz0gZW1pc3Npb24ueHl6Owpjb2xvciA9IHZlYzQoY29sb3IucmdiICogZGlmZnVzZS5hLCBkaWZmdXNlLmEpOwpnbF9GcmFnQ29sb3IgPSBjb2xvcjsKfQo="
+            },
+            "VS": {
+                "type": 35633,
+                "uri": "data:text/plain;base64,cHJlY2lzaW9uIGhpZ2hwIGZsb2F0OwphdHRyaWJ1dGUgdmVjMyBhX3Bvc2l0aW9uOwp1bmlmb3JtIG1hdDQgdV9tb2RlbFZpZXdNYXRyaXg7CnVuaWZvcm0gbWF0NCB1X3Byb2plY3Rpb25NYXRyaXg7CmF0dHJpYnV0ZSB2ZWMyIGFfdGV4Y29vcmQwOwp2YXJ5aW5nIHZlYzIgdl90ZXhjb29yZDA7CnZvaWQgbWFpbih2b2lkKSB7CnZlYzQgcG9zID0gdV9tb2RlbFZpZXdNYXRyaXggKiB2ZWM0KGFfcG9zaXRpb24sMS4wKTsKdl90ZXhjb29yZDAgPSBhX3RleGNvb3JkMDsKZ2xfUG9zaXRpb24gPSB1X3Byb2plY3Rpb25NYXRyaXggKiBwb3M7Cn0K"
+            }
+        }
+        header["samplers"] = {
+            "sampler_0": {
+                "magFilter": 9729,
+                "minFilter": 9729,
+                "wrapS": 10497,
+                "wrapT": 10497
+            }
+        }
 
     # Technique for batched glTF
     """if batched:

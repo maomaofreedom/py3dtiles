@@ -78,7 +78,8 @@ class TriangleSoup:
 
         verticeTriangles = self.triangles[1 + index]
         verticeArray = vertexAttributeToArray(verticeTriangles)
-        return b''.join(verticeArray)
+        return verticeArray
+        #return b''.join(verticeArray)
 
     def getNormalArray(self):
         """
