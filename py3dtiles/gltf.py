@@ -94,7 +94,6 @@ class GlTF(object):
             for poly in mp:
                 triangles.extend(triangulate(poly))
             nodes.append(triangles)
-            normals.append(compute_normals(triangles))
 
             bb.append(bbox)
 
@@ -103,11 +102,10 @@ class GlTF(object):
         binIds = []
         nVertices = []
         for i in range(0, len(nodes)):
-            (verticeArray, normalArray) = trianglesToArrays(nodes[i],
-                                                            normals[i])
+            (verticeArray, normalArray) = trianglesToArrays(nodes[i], None)
             packedVertices = b''.join(verticeArray)
             binVertices.append(packedVertices)
-            binNormals.append(b''.join(normalArray))
+            # binNormals.append(b''.join(normalArray))
             nVertices.append(len(verticeArray))
             if batched:
                 binIds.append(np.full(len(verticeArray), i, dtype=np.uint16))
@@ -123,9 +121,10 @@ class GlTF(object):
 
 def compute_binary(binVertices, binNormals, binIds):
     bv = b''.join(binVertices)
-    bn = b''.join(binNormals)
+    # bn = b''.join(binNormals)
     bid = b''.join(binIds)
-    return bv + bn + bid
+    #return bv + bn + bid
+    return bv + bid
 
 
 def compute_header(binVertices, binNormals, binIds,
@@ -139,7 +138,7 @@ def compute_header(binVertices, binNormals, binIds,
 
     buffers = {
         'binary_glTF': {
-            'byteLength': 13/6 * sum(sizeVce) if batched else 2 * sum(sizeVce),
+            'byteLength': 7/6 * sum(sizeVce) if batched else 2 * sum(sizeVce),
             'type': "arraybuffer"
         }
     }
@@ -153,19 +152,13 @@ def compute_header(binVertices, binNormals, binIds,
             'byteLength': sum(sizeVce),
             'byteOffset': 0,
             'target': 34962
-        },
-        'BV_normals': {
-            'buffer': "binary_glTF",
-            'byteLength': sum(sizeVce),
-            'byteOffset': sum(sizeVce),
-            'target': 34962
         }
     }
     if batched:
         bufferViews['BV_ids'] = {
             'buffer': "binary_glTF",
             'byteLength': sum(sizeVce) / 6,
-            'byteOffset': 2 * sum(sizeVce),
+            'byteOffset': sum(sizeVce),
             'target': 34962
         }
 
@@ -184,16 +177,6 @@ def compute_header(binVertices, binNormals, binIds,
             'min': [min([bb[i][1][1] for i in range(0, meshNb)]),
                     min([bb[i][1][2] for i in range(0, meshNb)]),
                     min([bb[i][1][0] for i in range(0, meshNb)])],
-            'type': "VEC3"
-        }
-        accessors["AN"] = {
-            'bufferView': "BV_normals",
-            'byteOffset': 0,
-            'byteStride': 12,
-            'componentType': 5126,
-            'count': sum(nVertices),
-            'max': [1, 1, 1],
-            'min': [-1, -1, -1],
             'type': "VEC3"
         }
         accessors["AD"] = {
@@ -216,16 +199,6 @@ def compute_header(binVertices, binNormals, binIds,
                 'min': [bb[i][1][1], bb[i][1][2], bb[i][1][0]],
                 'type': "VEC3"
             }
-            accessors["AN_" + str(i)] = {
-                'bufferView': "BV_normals",
-                'byteOffset': sum(sizeVce[0:i]),
-                'byteStride': 12,
-                'componentType': 5126,
-                'count': nVertices[i],
-                'max': [1, 1, 1],
-                'min': [-1, -1, -1],
-                'type': "VEC3"
-            }
 
     # Meshes
     meshes = {}
@@ -234,7 +207,6 @@ def compute_header(binVertices, binNormals, binIds,
             'primitives': [{
                 'attributes': {
                     "POSITION": "AV",
-                    "NORMAL": "AN",
                     "BATCHID": "AD"
                 },
                 "material": "defaultMaterial",
@@ -247,7 +219,6 @@ def compute_header(binVertices, binNormals, binIds,
                 'primitives': [{
                     'attributes': {
                         "POSITION": "AV_" + str(i),
-                        "NORMAL": "AN_" + str(i)
                     },
                     "indices": "AI_" + str(i),
                     "material": "defaultMaterial",
@@ -327,10 +298,8 @@ def trianglesToArrays(triangles, normals):
     vertice = []
     normalArray = []
     for i in range(0, len(triangles)):
-        n = normals[i]
         for vertex in triangles[i]:
             vertice.append(vertex)
-            normalArray.append(n)
     return (vertice, normalArray)
 
 
