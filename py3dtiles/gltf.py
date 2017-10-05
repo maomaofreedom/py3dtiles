@@ -90,11 +90,13 @@ class GlTF(object):
         bb = []
         for wkb, bbox in zip(wkbs, bboxes):
             mp = parse(bytes(wkb))
-            triangles = []
-            for poly in mp:
-                triangles.extend(triangulate(poly))
-            nodes.append(triangles)
+            # triangles = []
+            # for poly in mp:
+            #    triangles.extend(triangulate(poly))
+            # nodes.append(triangles)
+            # normals.append(compute_normals(triangles))
 
+            nodes.append(mp)
             bb.append(bbox)
 
         binVertices = []
@@ -102,7 +104,10 @@ class GlTF(object):
         binIds = []
         nVertices = []
         for i in range(0, len(nodes)):
-            (verticeArray, normalArray) = trianglesToArrays(nodes[i], None)
+            #(verticeArray, normalArray) = trianglesToArrays(nodes[i],
+            #                                                normals[i])
+            
+            verticeArray = nodes[i]
             packedVertices = b''.join(verticeArray)
             binVertices.append(packedVertices)
             # binNormals.append(b''.join(normalArray))
@@ -121,10 +126,10 @@ class GlTF(object):
 
 def compute_binary(binVertices, binNormals, binIds):
     bv = b''.join(binVertices)
-    # bn = b''.join(binNormals)
+    bn = b''.join(binNormals)
     bid = b''.join(binIds)
-    #return bv + bn + bid
     return bv + bid
+    # bn + bid
 
 
 def compute_header(binVertices, binNormals, binIds,
@@ -153,11 +158,18 @@ def compute_header(binVertices, binNormals, binIds,
             'byteOffset': 0,
             'target': 34962
         }
+        # 'BV_normals': {
+        #     'buffer': "binary_glTF",
+        #     'byteLength': sum(sizeVce),
+        #     'byteOffset': sum(sizeVce),
+        #     'target': 34962
+        # }
     }
     if batched:
         bufferViews['BV_ids'] = {
             'buffer': "binary_glTF",
             'byteLength': sum(sizeVce) / 6,
+            # 'byteOffset': 2 * sum(sizeVce),
             'byteOffset': sum(sizeVce),
             'target': 34962
         }
@@ -179,6 +191,16 @@ def compute_header(binVertices, binNormals, binIds,
                     min([bb[i][1][0] for i in range(0, meshNb)])],
             'type': "VEC3"
         }
+        # accessors["AN"] = {
+        #     'bufferView': "BV_normals",
+        #     'byteOffset': 0,
+        #     'byteStride': 12,
+        #     'componentType': 5126,
+        #     'count': sum(nVertices),
+        #     'max': [1, 1, 1],
+        #     'min': [-1, -1, -1],
+        #     'type': "VEC3"
+        # }
         accessors["AD"] = {
             'bufferView': "BV_ids",
             'byteOffset': 0,
@@ -199,6 +221,16 @@ def compute_header(binVertices, binNormals, binIds,
                 'min': [bb[i][1][1], bb[i][1][2], bb[i][1][0]],
                 'type': "VEC3"
             }
+            # accessors["AN_" + str(i)] = {
+            #     'bufferView': "BV_normals",
+            #     'byteOffset': sum(sizeVce[0:i]),
+            #     'byteStride': 12,
+            #     'componentType': 5126,
+            #     'count': nVertices[i],
+            #     'max': [1, 1, 1],
+            #     'min': [-1, -1, -1],
+            #     'type': "VEC3"
+            # }
 
     # Meshes
     meshes = {}
@@ -207,10 +239,11 @@ def compute_header(binVertices, binNormals, binIds,
             'primitives': [{
                 'attributes': {
                     "POSITION": "AV",
+#                    "NORMAL": "AN",
                     "BATCHID": "AD"
                 },
                 "material": "defaultMaterial",
-                "mode": 4
+                "mode": 1
             }]
         }
     else:
@@ -219,6 +252,7 @@ def compute_header(binVertices, binNormals, binIds,
                 'primitives': [{
                     'attributes': {
                         "POSITION": "AV_" + str(i),
+#                        "NORMAL": "AN_" + str(i)
                     },
                     "indices": "AI_" + str(i),
                     "material": "defaultMaterial",
@@ -298,8 +332,10 @@ def trianglesToArrays(triangles, normals):
     vertice = []
     normalArray = []
     for i in range(0, len(triangles)):
+        n = normals[i]
         for vertex in triangles[i]:
             vertice.append(vertex)
+            normalArray.append(n)
     return (vertice, normalArray)
 
 
@@ -310,15 +346,10 @@ def triangulate(poly):
     polygon = poly[0]
     holes = poly[1:]
 
-    holes_index = []
     allVertices = polygon[:]
     for elem in holes:
-      #print(len(elem))
-      holes_index += [len(allVertices)]
       allVertices.extend(elem)
-    #if len(holes_index) > 0:
-        #print(len(allVertices))
-        #print(holes_index)
+
     vect1 = polygon[1] - polygon[0]
     vect2 = polygon[2] - polygon[0]
     vectProd = np.cross(vect1, vect2)
@@ -331,7 +362,6 @@ def triangulate(poly):
       for i in range(len(hole)):
         segments.append([i + idx, (i+1)%len(hole) + idx])
       idx += len(hole)
-
     # triangulation of the polygon projected on planes (xy) (zx) or (yz)
     if(math.fabs(vectProd[0]) > math.fabs(vectProd[1])
        and math.fabs(vectProd[0]) > math.fabs(vectProd[2])):
@@ -352,9 +382,9 @@ def triangulate(poly):
         for v in range(0, len(hole)):
             polygon2D.append([hole[v][x], hole[v][y]])
 
-    args = {'vertices': polygon2D}
-    #        'segments': segments}
-    if False and len(holes) != 0:
+    args = {'vertices': polygon2D,
+            'segments': segments}
+    if len(holes) != 0:
         holePoints = []
         for hole in holes:
             polygon = Polygon([(point[x], point[y]) for point in hole])
@@ -379,16 +409,10 @@ def triangulate(poly):
     if ear:
         vertices = [coord for vert in args['vertices'] for coord in vert]
         hole_base = len(args['vertices'])
-        holes = []
-        #if 'holes' in args:
-        #    vertices += [coord for vert in args['holes'] for coord in vert]
-        #    hole_count = len(args['holes'])
-        #    holes = [hole_base + i for i in range(hole_count)]
-        #    holes = []
-
-        #print(vertices)
-        #print(holes)
-        trianglesIdx = earcut.earcut(vertices, holes_index, 2)
+        vertices += [coord for vert in args['holes'] for coord in vert]
+        hole_count = len(args['holes'])
+        holes = [hole_base + i for i in range(hole_count)]
+        trianglesIdx = earcut.earcut(vertices, holes, 2)
         if len(trianglesIdx) == 0:
             return []
     else:
@@ -398,16 +422,16 @@ def triangulate(poly):
             return []
         trianglesIdx = triangulation['triangles']
     triangles = []
-    t = trianglesIdx
-    #print('{} -> {}'.format(len(trianglesIdx), trianglesIdx))
-    for i in range(0, len(trianglesIdx), 3):
+
+    print(allVertices)
+    print(len(allVertices))
+    for t in trianglesIdx:
         # triangulation may break triangle orientation, test it before
         # adding triangles
-        #print('{} {} {} ({})'.format(t[i + 0], t[i + 1], t[i + 2], len(allVertices)))
-        if(t[i + 0] > t[i + 1] > t[i + 2] or t[i + 2] > t[i + 0] > t[i + 1] or t[i + 1] > t[i + 2] > t[i + 0]):
-            triangles.append([allVertices[t[i + 1]], allVertices[t[i + 0]], allVertices[t[i + 2]]])
+        if(t[0] > t[1] > t[2] or t[2] > t[0] > t[1] or t[1] > t[2] > t[0]):
+            triangles.append([allVertices[t[1]], allVertices[t[0]], allVertices[t[2]]])
         else:
-            triangles.append([allVertices[t[i + 0]], allVertices[t[i + 1]], allVertices[t[i + 2]]])
+            triangles.append([allVertices[t[0]], allVertices[t[1]], allVertices[t[2]]])
 
     return triangles
 
@@ -437,6 +461,12 @@ def parse(wkb):
     # print(byteorder)
     # geomtype = struct.unpack('I', wkb[1:5])    # 1006 (Multipolygon Z)
     # print(geomtype)
+    typ = struct.unpack('I', wkb[1:5])[0]
+
+    if typ != 1005 and typ != 1006:
+        print('Unsupported geom type:' + str(typ))
+        return None
+
     geomNb = struct.unpack('I', wkb[5:9])[0]
     # print(geomNb)
     # print(struct.unpack('b', wkb[9:10])[0])
@@ -444,22 +474,37 @@ def parse(wkb):
     # print(struct.unpack('I', wkb[14:18])[0])   # num lines
     # print(struct.unpack('I', wkb[18:22])[0])   # num points
     offset = 9
+    line_segments = []
     for i in range(0, geomNb):
         offset += 5  # struct.unpack('bI', wkb[offset:offset+5])[0]
         # 1 (byteorder), 1003 (Polygon)
-        lineNb = struct.unpack('I', wkb[offset:offset+4])[0]
-        offset += 4
-        polygon = []
+
+        if typ == 1006: # multipolygon Z
+            lineNb = struct.unpack('I', wkb[offset:offset+4])[0]
+            offset += 4
+        elif typ == 1005: # multiline Z
+            lineNb = 1
+        else:
+            print(wkb[1:5])
+            print('foo ' + str(typ))
+            raise 'rr'
         for j in range(0, lineNb):
             pointNb = struct.unpack('I', wkb[offset:offset+4])[0]  # num points
             offset += 4
             line = []
-            for k in range(0, pointNb-1):
+            previous_point = None
+            # print(pointNb)
+            for k in range(0, pointNb):
                 point = np.array(struct.unpack('ddd', wkb[offset:offset+24]),
                                  dtype=np.float32)
                 offset += 24
-                line.append(point)
-            offset += 24   # skip redundant point
-            polygon.append(line)
-        multiPolygon.append(polygon)
-    return multiPolygon
+                # todo: for polygon we should draw using closed lines
+                if k >= 2:
+                    line_segments.append(previous_point)
+                line_segments.append(point)
+                previous_point = point
+            # offset += 24   # skip redundant point
+            # polygon.append(line)
+        #multiPolygon.append(polygon)
+    # print(line_segments)
+    return line_segments
