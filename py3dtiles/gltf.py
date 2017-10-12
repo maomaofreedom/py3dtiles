@@ -2,7 +2,7 @@
 import struct
 import math
 import triangle
-import earcut
+from .earcut import earcut
 import numpy as np
 import json
 from shapely.geometry import Point, Polygon
@@ -412,7 +412,7 @@ def triangulate(poly):
         vertices += [coord for vert in args['holes'] for coord in vert]
         hole_count = len(args['holes'])
         holes = [hole_base + i for i in range(hole_count)]
-        trianglesIdx = earcut.earcut(vertices, holes, 2)
+        trianglesIdx = earcut(vertices, holes, 2)
         if len(trianglesIdx) == 0:
             return []
     else:
